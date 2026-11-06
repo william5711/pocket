@@ -1798,13 +1798,20 @@ function makeSbStore(uid) {
   const persist = () => { clearTimeout(saveT); saveT = setTimeout(() => { try { localStorage.setItem(key, JSON.stringify(Object.fromEntries(cache))); } catch {} }, 400); };
   const emit = () => { persist(); for (const f of subs) f(null); };
   const fail = e => ({ code: "unavailable", message: e?.message || String(e) });
-  async function loadAll() {
+  // Refetch everything, but only redraw when something actually changed (a redraw mid-typing loses your place).
+  let lastSig = null, lastLoad = 0;
+  async function loadAll(force) {
+    if (!force && loaded && Date.now() - lastLoad < 5000) return;
+    lastLoad = Date.now();
     const rows = [];
     for (let from = 0; ; from += 1000) {
       const { data, error } = await sb.from("docs").select("path,data").range(from, from + 999);
       if (error) throw fail(error);
       rows.push(...data); if (data.length < 1000) break;
     }
+    const sig = JSON.stringify(rows.map(r => [r.path, r.data]).sort((a, b) => a[0] < b[0] ? -1 : 1));
+    const changed = !loaded || sig !== lastSig; lastSig = sig;
+    if (!changed) return;
     cache.clear(); for (const r of rows) cache.set(r.path, r.data); loaded = true; emit();
   }
   sb.channel("docs-" + uid)
@@ -1851,7 +1858,7 @@ function makeSbStore(uid) {
       const { error } = await sb.from("docs").upsert(rows.slice(i, i + 400).map(r => ({ user_id: uid, ...r, updated_at: new Date().toISOString() })));
       if (error) throw fail(error);
     }
-    await loadAll();
+    await loadAll(true);
     return rows.length;
   }
   return { doc, collection, importAll };
