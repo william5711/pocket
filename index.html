@@ -370,6 +370,8 @@ body.sheet-open #scroller { transform: scale(.94) translateY(10px); border-radiu
 .auth-card h2 { margin: 4px 0 0; font-family: var(--display); font-size: 24px; letter-spacing: -.02em; }
 .auth-card p { margin: 0; color: var(--ink-2); font-size: 14px; }
 .auth-card .field, .auth-card .btn { width: 100%; }
+.auth-links { display: flex; justify-content: space-between; width: 100%; }
+.link.quiet { color: var(--ink-2); font-weight: 600; }
 .auth-card .code { text-align: center; font-size: 26px; letter-spacing: .3em; font-weight: 800; }
 label.btn { display: inline-flex; align-items: center; cursor: pointer; }
 .foot { margin: 0; font-size: 12.5px; color: var(--ink-2); text-align: center; padding: 0 12px; }
@@ -501,7 +503,7 @@ label.lbl .field, div.lbl .chips, div.lbl .hint { text-transform: none; letter-s
 <div id="toastRoot"></div>
 
 <div id="authRoot"></div>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/dist/umd/supabase.js"></script>
 <script src="config.js"></script>
 <script>
 const DEFAULT_CATS = [
@@ -1883,49 +1885,58 @@ function startLive(user) {
   col.onSnapshot(q => { S.txs = q.docs.map(d => ({ id: d.id, ...d.data() })); settle(q); render(); }, fail);
 }
 
-/* ---------- sign-in: email + 6-digit code (works inside a home-screen app, unlike email links) ---------- */
-function showAuth(step = "email", email = "", msg = "") {
+/* ---------- sign-in: email + password (stays inside a home-screen app; iPhone can save it in Keychain) ---------- */
+function showAuth(step = "signin", email = "", msg = "", note = "") {
   const root = document.getElementById("authRoot");
+  const titles = { signin: "Sign in to Pocket", signup: "Create your Pocket account", reset: "Reset your password", newpass: "Choose a new password" };
   root.innerHTML = `<div class="auth"><form class="auth-card" id="authForm" data-step="${step}">
     <img src="icons/icon-192.png" alt="" width="64" height="64">
-    <h2>${step === "email" ? "Sign in to Pocket" : "Check your email"}</h2>
-    <p>${step === "email" ? "We'll email you a 6-digit code. Your data syncs between your iPhone and computer." : `Enter the 6-digit code sent to <strong>${esc(email)}</strong>.`}</p>
-    ${step === "email"
-      ? `<input class="field" id="authEmail" type="email" inputmode="email" autocomplete="email" placeholder="you@example.com" value="${esc(email)}" required>`
-      : `<input class="field code" id="authCode" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]*" maxlength="8" placeholder="123456" required>`}
+    <h2>${titles[step]}</h2>
+    <p>${note ? esc(note) : step === "signin" ? "Your data syncs between your iPhone and computer." : step === "signup" ? "Use any email and a password of at least 8 characters." : step === "reset" ? "We'll email you a link to set a new password." : "Enter a new password for your account."}</p>
+    ${step !== "newpass" ? `<input class="field" id="authEmail" name="email" type="email" inputmode="email" autocomplete="${step === "signup" ? "email" : "username"}" placeholder="you@example.com" value="${esc(email)}" required>` : ""}
+    ${step !== "reset" ? `<input class="field" id="authPass" name="password" type="password" autocomplete="${step === "signin" ? "current-password" : "new-password"}" placeholder="Password" minlength="${step === "signin" ? 1 : 8}" required>` : ""}
     <div class="err">${esc(msg)}</div>
-    <button class="btn primary" type="submit">${step === "email" ? "Send code" : "Sign in"}</button>
-    ${step === "code" ? `<button class="link" type="button" data-act="authback">Use a different email</button>` : `<button class="link" type="button" data-act="authclose">Just look around</button>`}
+    <button class="btn primary" type="submit">${{ signin: "Sign in", signup: "Create account", reset: "Send reset link", newpass: "Save password" }[step]}</button>
+    ${step === "signin" ? `<div class="auth-links"><button class="link" type="button" data-act="authstep" data-id="signup">Create account</button><button class="link" type="button" data-act="authstep" data-id="reset">Forgot password?</button></div>
+      <button class="link quiet" type="button" data-act="authclose">Just look around</button>`
+      : step !== "newpass" ? `<button class="link" type="button" data-act="authstep" data-id="signin">Back to sign in</button>` : ""}
   </form></div>`;
-  root.dataset.email = email;
-  setTimeout(() => document.getElementById(step === "email" ? "authEmail" : "authCode")?.focus(), 50);
+  setTimeout(() => document.getElementById(step === "newpass" ? "authPass" : "authEmail")?.focus(), 50);
 }
 function hideAuth() { document.getElementById("authRoot").innerHTML = ""; }
 document.addEventListener("submit", async e => {
   if (e.target.id !== "authForm") return;
   e.preventDefault(); e.stopImmediatePropagation();
-  const f = e.target, btn = f.querySelector('button[type="submit"]'); btn.disabled = true;
+  const f = e.target, step = f.dataset.step, btn = f.querySelector('button[type="submit"]'); btn.disabled = true;
+  const email = document.getElementById("authEmail")?.value.trim() || "", password = document.getElementById("authPass")?.value || "";
   try {
-    if (f.dataset.step === "email") {
-      const email = document.getElementById("authEmail").value.trim();
-      const { error } = await sb.auth.signInWithOtp({ email, options: { shouldCreateUser: true } });
-      if (error) throw error;
-      showAuth("code", email);
-    } else {
-      const email = document.getElementById("authRoot").dataset.email, token = document.getElementById("authCode").value.trim();
-      const { data, error } = await sb.auth.verifyOtp({ email, token, type: "email" });
+    if (step === "signin") {
+      const { data, error } = await sb.auth.signInWithPassword({ email, password });
       if (error) throw error;
       hideAuth(); startLive(data.user); toast("Signed in");
+    } else if (step === "signup") {
+      const { data, error } = await sb.auth.signUp({ email, password, options: { emailRedirectTo: location.origin + location.pathname } });
+      if (error) throw error;
+      if (data.session) { hideAuth(); startLive(data.user); toast("Account created"); }
+      else showAuth("signin", email, "", "Check your email and tap the confirmation link, then sign in here.");
+    } else if (step === "reset") {
+      const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname });
+      if (error) throw error;
+      showAuth("signin", email, "", "If that email has an account, a reset link is on its way. Open it, set a new password, then sign in.");
+    } else if (step === "newpass") {
+      const { data, error } = await sb.auth.updateUser({ password });
+      if (error) throw error;
+      hideAuth(); startLive(data.user); toast("Password updated");
     }
   } catch (err) {
-    showAuth(f.dataset.step, f.dataset.step === "email" ? document.getElementById("authEmail")?.value : document.getElementById("authRoot").dataset.email, err.message || "Something went wrong. Try again.");
+    showAuth(step, email, err.message || "Something went wrong. Try again.");
   }
 }, true);
 document.addEventListener("click", async e => {
   const a = e.target.closest("[data-act]")?.dataset.act;
   if (a === "signin") { if (sb) showAuth(); else toast("Add your Supabase details to config.js first"); }
   else if (a === "authclose") hideAuth();
-  else if (a === "authback") showAuth("email", document.getElementById("authRoot").dataset.email);
+  else if (a === "authstep") showAuth(e.target.closest("[data-act]").dataset.id, document.getElementById("authEmail")?.value || "");
   else if (a === "signout") { await sb?.auth.signOut(); try { for (const k of Object.keys(localStorage)) if (k.startsWith("pocket-cache-")) localStorage.removeItem(k); } catch {} location.reload(); }
 });
 document.addEventListener("change", async e => {
@@ -1944,8 +1955,11 @@ async function init() {
   render();
   const cfg = window.POCKET_CONFIG || {};
   if (!cfg.supabaseUrl || !cfg.supabaseAnonKey || !window.supabase) return startPreview();
-  sb = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false } });
+  sb = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
+  // Opening a password-reset link signs you in briefly so you can pick a new password.
+  sb.auth.onAuthStateChange(ev => { if (ev === "PASSWORD_RECOVERY") showAuth("newpass"); });
   const { data } = await sb.auth.getSession();
+  if (location.hash.includes("type=recovery")) { if (!data.session) startPreview(); return; }
   if (data.session) startLive(data.session.user);
   else { startPreview(); showAuth(); }
 }

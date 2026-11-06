@@ -1,3 +1,8 @@
 .DS_Store
 # never commit personal data exports
 *export*.json
+
+# files carried over from the Claude version (not part of the site)
+left-to-spend.html
+pocket-qr.png
+pocket-icon.png
