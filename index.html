@@ -1274,7 +1274,9 @@ function vBudget(d) {
       <p>${S.mode === "live" ? `Saved privately to your Pocket account${S.userEmail ? ` (${esc(S.userEmail)})` : ""}. It syncs between your iPhone and computer.` : "Preview mode: changes last until you close the page."}</p>
       <div class="btns"><button class="btn primary" data-act="csv" data-scope="all">Download all transactions (CSV)</button>
       ${S.mode === "live" ? `<label class="btn" for="importFile">Import data file</label><input type="file" id="importFile" accept=".json,application/json" hidden>
-      <button class="btn danger" data-act="signout">Sign out</button>` : ""}<button class="btn" data-act="examples">Add example month</button>
+      <button class="btn danger" data-act="signout">Sign out</button>` : ""}</div>
+      ${S.pendingImport ? `<div class="notice" id="importConfirm"><strong>Ready to import ${Object.keys(S.pendingImport.tx || {}).length} transactions</strong> plus your settings, cards and accounts. Anything with the same ID is replaced.
+        <div class="btns" style="margin-top:10px"><button class="btn primary" data-act="doimport">Import now</button><button class="btn" data-act="cancelimport">Cancel</button></div></div>` : ""}<div class="btns"><button class="btn" data-act="examples">Add example month</button>
       ${hasEx ? `<button class="btn danger" data-act="clearex">${S.armed === "clearex" ? "Tap again to clear examples" : "Clear example entries"}</button>` : ""}</div>
     </div></section>`;
 }
@@ -1936,6 +1938,11 @@ document.addEventListener("click", async e => {
   const a = e.target.closest("[data-act]")?.dataset.act;
   if (a === "signin") { if (sb) showAuth(); else toast("Add your Supabase details to config.js first"); }
   else if (a === "authclose") hideAuth();
+  else if (a === "doimport" && S.pendingImport) {
+    const obj = S.pendingImport, n = Object.keys(obj.tx || {}).length; S.pendingImport = null; render();
+    try { await liveStoreRef.importAll(obj); toast(`Imported ${n} transactions`); } catch (err) { toast("Couldn't import: " + (err.message || "try again")); }
+  }
+  else if (a === "cancelimport") { S.pendingImport = null; render(); }
   else if (a === "authstep") showAuth(e.target.closest("[data-act]").dataset.id, document.getElementById("authEmail")?.value || "");
   else if (a === "signout") { await sb?.auth.signOut(); try { for (const k of Object.keys(localStorage)) if (k.startsWith("pocket-cache-")) localStorage.removeItem(k); } catch {} location.reload(); }
 });
@@ -1944,9 +1951,9 @@ document.addEventListener("change", async e => {
   try {
     const obj = JSON.parse(await e.target.files[0].text());
     if (obj.format !== "pocket-export-1") return toast("That isn't a Pocket export file");
-    const n = Object.keys(obj.tx || {}).length;
-    if (!confirm(`Import ${n} transactions plus your settings, cards and accounts? Anything with the same ID is replaced.`)) return;
-    await liveStoreRef.importAll(obj); toast(`Imported ${n} transactions`);
+    // Confirm inside the page: some in-app browsers block confirm() pop-ups.
+    S.pendingImport = obj; render();
+    document.getElementById("importConfirm")?.scrollIntoView({ block: "center", behavior: "smooth" });
   } catch (err) { toast("Couldn't import: " + (err.message || "unreadable file")); }
   finally { e.target.value = ""; }
 });
